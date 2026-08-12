@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- אייקון האתר (משמש גם למחשב וגם לנייד) -->
+    <link rel="icon" type="image/x-icon" href="icon.ico">
+    <link rel="apple-touch-icon" href="icon.ico">
+    
+    <title>כספת קבצים מוצפנת - Mystic Vault</title>
+    <meta name="description" content="כספת טקסט וקבצים מוצפנת ומאובטחת ברמת AES-256. הצפנה ופענוח ישירות בדפדפן.">
+    <meta name="keywords" content="הצפנה, כספת קבצים, AES-256, אבטחת מידע, הצפנת טקסט">
+    <meta name="robots" content="index, follow">
+
+    <style>
+        body {
+            margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(-45deg, #0f172a, #1e3a8a, #1d4ed8, #2563eb);
+            background-size: 400% 400%;
+            animation: gradient-shift 10s ease infinite;
+            color: #fff; overflow: hidden;
+        }
+        @keyframes gradient-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+        .glass-box {
+            width: 90%; max-width: 800px; background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(25px); border-radius: 25px; border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5); padding: 40px; text-align: center;
+        }
+        textarea {
+            width: 100%; height: 250px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px; color: #fff; padding: 15px; font-size: 18px; resize: none; outline: none;
+        }
+        .btn {
+            background: #2563eb; color: white; border: none; padding: 15px 30px;
+            border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 20px;
+        }
+        .drop-zone {
+            margin-top: 20px; padding: 20px; border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 15px; cursor: pointer; color: #cbd5e1;
+        }
+        #status { margin-top: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="glass-box">
+    <h1>כספת טקסט בלעדית</h1>
+    <input type="password" id="passwordInput" placeholder="הכנס סיסמה להצפנה (לפחות 8 תווים)" style="width: 100%; padding: 10px; margin-bottom: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #fff; font-size: 14px;">
+    <textarea id="editor" placeholder="הכתוב כאן יינעל ויוצפן..."></textarea>
+    <button class="btn" onclick="lockAndSave()">נעל והורד קובץ (.mystic)</button>
+
+    <div class="drop-zone" id="dropZone">
+        גרור לכאן קובץ .mystic לפתיחה
+        <input type="file" id="fileInput" hidden>
+    </div>
+    <div id="status"></div>
+</div>
+
+<script>
+    const BINARY_LOCK = new Uint8Array([0xFF, 0xFE, 0x4D, 0x59, 0x53, 0x54, 0x49, 0x43]);
+
+    // גזירת מפתח מבוססת סיסמה ו-Salt אקראי
+    async function getSecretKey(userPassword, salt) {
+        const enc = new TextEncoder();
+        const keyMaterial = await window.crypto.subtle.importKey(
+            "raw", 
+            enc.encode(userPassword), 
+            { name: "PBKDF2" }, 
+            false, 
+            ["deriveKey"]
+        );
+        return window.crypto.subtle.deriveKey(
+            { 
+                name: "PBKDF2", 
+                salt: salt, 
+                iterations: 600000, 
+                hash: "SHA-256" 
+            },
+            keyMaterial, 
+            { name: "AES-GCM", length: 256 }, 
+            false, 
+            ["encrypt", "decrypt"]
+        );
+    }
+
+    // חישוב HMAC תקין בעזרת איחוד בייטים נקי (ArrayBuffer)
+    async function generateHMAC(data, userPassword, salt) {
+        const enc = new TextEncoder();
+        const pwdBytes = enc.encode(userPassword);
+        
+        // חיבור בינארי נקי של הסיסמה וה-Salt מונע שגיאות תווים
+        const combinedKeyData = new Uint8Array(pwdBytes.length + salt.length);
+        combinedKeyData.set(pwdBytes, 0);
+        combinedKeyData.set(salt, pwdBytes.length);
+
+        const keyMaterial = await window.crypto.subtle.importKey(
+            "raw",
+            combinedKeyData,
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign"]
+        );
+        return await window.crypto.subtle.sign("HMAC", keyMaterial, data);
+    }
+
+    async function lockAndSave() {
+        const text = document.getElementById('editor').value;
+        const userPassword = document.getElementById('passwordInput')?.value || "";
+        
+        if (!text) {
+            document.getElementById('status').innerText = "אנא הכנס טקסט לפני הצפנה";
+            return;
+        }
+        if (userPassword.length < 8) {
+            document.getElementById('status').innerText = "שגיאה: לביטחון מרבי, נדרשת סיסמה בת 8 תווים לפחות!";
+            return;
+        }
+
+        const salt = window.crypto.getRandomValues(new Uint8Array(16));
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const key = await getSecretKey(userPassword, salt);
+        
+        const timestamp = new Uint8Array(8);
+        new DataView(timestamp.buffer).setBigInt64(0, BigInt(Date.now()), true);
+        
+        const textBytes = new TextEncoder().encode(text);
+        const encrypted = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, textBytes);
+
+        const hmacData = new Uint8Array(timestamp.length + encrypted.byteLength);
+        hmacData.set(timestamp, 0);
+        hmacData.set(new Uint8Array(encrypted), timestamp.length);
+        const hmac = await generateHMAC(hmacData, userPassword, salt);
+
+        const finalBuffer = new Uint8Array(
+            BINARY_LOCK.length + salt.length + iv.length + timestamp.length + hmac.byteLength + encrypted.byteLength
+        );
+        let offset = 0;
+        finalBuffer.set(BINARY_LOCK, offset); offset += BINARY_LOCK.length;
+        finalBuffer.set(salt, offset); offset += salt.length;
+        finalBuffer.set(iv, offset); offset += iv.length;
+        finalBuffer.set(timestamp, offset); offset += timestamp.length;
+        finalBuffer.set(new Uint8Array(hmac), offset); offset += hmac.byteLength;
+        finalBuffer.set(new Uint8Array(encrypted), offset);
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([finalBuffer], { type: "application/octet-stream" }));
+        a.download = `SecureData_${Date.now()}.mystic`;
+        a.click();
+        
+        document.getElementById('status').innerText = "✓ הקובץ ננעל ומוצפן בהצלחה!";
+    }
+
+    async function handleFile(files) {
+        if (!files || files.length === 0) return;
+        const file = files[0];
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const buffer = new Uint8Array(e.target.result);
+                const header = buffer.slice(0, BINARY_LOCK.length);
+                const isMatch = header.every((b, i) => b === BINARY_LOCK[i]);
+
+                if (!isMatch) {
+                    document.getElementById('status').innerText = "שגיאה: הקובץ אינו במבנה מוכר!";
+                    return;
+                }
+
+                const userPassword = prompt("הכנס סיסמה לפענוח:") || "";
+                if (!userPassword) {
+                    document.getElementById('status').innerText = "פעולה בוטלה.";
+                    return;
+                }
+                
+                let offset = BINARY_LOCK.length;
+                const salt = buffer.slice(offset, offset + 16); offset += 16;
+                const iv = buffer.slice(offset, offset + 12); offset += 12;
+                const timestampBytes = buffer.slice(offset, offset + 8); offset += 8;
+                const hmac = buffer.slice(offset, offset + 32); offset += 32;
+                const encryptedData = buffer.slice(offset);
+
+                // אימות HMAC
+                const hmacData = new Uint8Array(timestampBytes.length + encryptedData.byteLength);
+                hmacData.set(timestampBytes, 0);
+                hmacData.set(encryptedData, timestampBytes.length);
+                const expectedHmac = await generateHMAC(hmacData, userPassword, salt);
+                
+                const expectedHmacArr = new Uint8Array(expectedHmac);
+                const hmacMatch = expectedHmacArr.every((b, i) => b === hmac[i]);
+                
+                if (!hmacMatch) {
+                    document.getElementById('status').innerText = "שגיאה: סיסמה שגויה או שהקובץ שונה!";
+                    return;
+                }
+
+                // פענוח
+                const key = await getSecretKey(userPassword, salt);
+                const decrypted = await window.crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv }, 
+                    key, 
+                    encryptedData
+                );
+                
+                const text = new TextDecoder().decode(decrypted);
+                document.getElementById('editor').value = text;
+                document.getElementById('status').innerText = `✓ הקובץ פוענח בהצלחה!`;
+            } catch (err) {
+                console.error("Decryption error:", err);
+                document.getElementById('status').innerText = "שגיאה בפענוח - סיסמה שגויה או קובץ פגום.";
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.style.background = 'rgba(37, 99, 235, 0.3)';
+        dropZone.style.borderColor = 'rgba(59, 130, 246, 0.8)';
+    });
+
+    dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.style.background = '';
+        dropZone.style.borderColor = '';
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.style.background = '';
+        dropZone.style.borderColor = '';
+        handleFile(e.dataTransfer.files);
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => handleFile(e.target.files));
+</script>
+</body>
+</html>
