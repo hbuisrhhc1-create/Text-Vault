@@ -1,0 +1,20 @@
+{
+  "name": "כספת טקסט וקבצים",
+  "short_name": "כספת",
+  "start_url": "./gemini-code-1787058147788.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
