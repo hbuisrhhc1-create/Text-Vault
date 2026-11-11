@@ -502,7 +502,7 @@
       border: 1px solid var(--border-color);
       border-radius: 20px;
       padding: 10px;
-      width: 210px;
+      width: 230px;
       box-shadow: 0 15px 35px rgba(37, 99, 235, 0.15);
       display: flex;
       flex-direction: column;
@@ -546,6 +546,20 @@
       background: #eff6ff;
       color: var(--border-focus);
       transform: translateX(-3px);
+    }
+
+    /* עיצוב כפתור מנוטרל (Disabled) עבור Android */
+    .fab-menu-item.disabled {
+      color: #94a3b8;
+      background-color: #f8fafc;
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+
+    .fab-menu-item.disabled:hover {
+      background-color: #f8fafc;
+      color: #94a3b8;
+      transform: none;
     }
   </style>
 </head>
@@ -655,9 +669,9 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
         מחשב Windows
       </a>
-      <a href="#" class="fab-menu-item" onclick="downloadPlatform('android', event)">
+      <a href="javascript:void(0)" class="fab-menu-item disabled" id="androidMenuItem" onclick="downloadPlatform('android', event)" title="האפליקציה כרגע לא זמינה להורדה">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-        אפליקציית Android
+        <span id="androidBtnText">Android (זמנית לא זמין)</span>
       </a>
     </div>
     <button class="fab-btn" id="fabBtn" onclick="toggleFabMenu()" title="הורד אפליקציה ותוכנה">
@@ -731,7 +745,8 @@
         statusFileReady: "הקובץ מוכן להצפנה",
         selectedFilePrefix: "נבחר קובץ: ",
         charCount: (n) => `תווים: ${n}`,
-        wordCount: (n) => `מילים: ${n}`
+        wordCount: (n) => `מילים: ${n}`,
+        androidBtnText: "Android (זמנית לא זמין)"
       },
       en: {
         pageTitle: "Exclusive Text & File Vault",
@@ -774,23 +789,21 @@
         statusFileReady: "File ready for encryption",
         selectedFilePrefix: "Selected file: ",
         charCount: (n) => `Chars: ${n}`,
-        wordCount: (n) => `Words: ${n}`
+        wordCount: (n) => `Words: ${n}`,
+        androidBtnText: "Android (Temporarily Unavailable)"
       }
     };
 
-    // Initialize UI settings from LocalStorage
     window.addEventListener('DOMContentLoaded', () => {
       if (currentLang === 'en') {
         applyLanguageSettings();
       }
-    
       const savedRounds = localStorage.getItem('mystic_rounds');
       if (savedRounds) {
         document.getElementById('roundsSelect').value = savedRounds;
       }
     });
 
-    // רישום Service Worker להתקנת אפליקציה וניקוי מטמון אוטומטי
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch(err => {
@@ -799,13 +812,11 @@
       });
     }
 
-    // פתיחה וסגירה של תפריט ההורדות הצף
     function toggleFabMenu() {
       const menu = document.getElementById('fabMenu');
       menu.classList.toggle('active');
     }
 
-    // סגירת התפריט בלחיצה מחוץ לכפתור
     window.addEventListener('click', function(e) {
       const container = document.querySelector('.fab-container');
       const menu = document.getElementById('fabMenu');
@@ -814,15 +825,15 @@
       }
     });
 
-    // טיפול בלחיצה על אחת האפשרויות בתפריט (עם הקישורים המעודכנים שלך)
     function downloadPlatform(platform, event) {
       event.preventDefault();
+      if (platform === 'android') {
+        // האפליקציה מושבתת זמנית - מונע הורדה
+        return false;
+      }
       toggleFabMenu();
-
       if (platform === 'windows') {
         window.location.href = "https://github.com/hbuisrhhc1-create/Text-Vault/releases/download/%D7%94%D7%95%D7%A8%D7%93%D7%94/-Output.zip";
-      } else if (platform === 'android') {
-        window.location.href = "https://github.com/hbuisrhhc1-create/Text-Vault/releases/download/%D7%94%D7%95%D7%A8%D7%93%D7%94/app-release.apk";
       }
     }
 
@@ -948,6 +959,7 @@
       setElementText('pageTitle', t.pageTitle);
       setElementText('mainTitle', t.mainTitle);
       setElementText('langText', t.langText);
+      setElementText('androidBtnText', t.androidBtnText);
       
       const pwdInput = document.getElementById('passwordInput');
       if (pwdInput) pwdInput.placeholder = t.passwordPlaceholder;
@@ -1148,29 +1160,25 @@
 
         const suggestedName = name + (type === 'file' ? '.mystic' : '.txt.mystic');
         const blob = new Blob([JSON.stringify(fileContainer)], { type: 'application/octet-stream' });
+        const file = new File([blob], suggestedName, { type: 'application/octet-stream' });
 
-        // פתיחת מנהל הקבצים בדפדפנים תומכים
-        if ('showSaveFilePicker' in window) {
+        // פתיחת חלון השיתוף של אנדרואיד (עוקף חסימות WebView באפליקציות APK)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
           try {
-            const handle = await window.showSaveFilePicker({
-              suggestedName: suggestedName,
-              types: [{
-                description: 'Mystic Encrypted File',
-                accept: { 'application/octet-stream': ['.mystic'] }
-              }],
+            await navigator.share({
+              files: [file],
+              title: 'כספת מוצפנת',
+              text: 'קובץ מוצפן ממערכת הכספת'
             });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
             updateStatus(t.statusEncrypted);
             clearAll();
             return;
-          } catch (pickerErr) {
-            if (pickerErr.name === 'AbortError') return;
+          } catch (shareErr) {
+            if (shareErr.name === 'AbortError') return;
           }
         }
 
-        // fallback זמני להורדה ב-WebView ובמכשירים ניידים
+        // גיבוי רגיל אם השיתוף לא זמין
         const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
@@ -1232,30 +1240,30 @@
           if (parsed.type === 'file') {
             const suggestedName = parsed.fileName || 'decrypted_file';
             const blob = new Blob([decryptedBytes]);
+            const decryptedFile = new File([blob], suggestedName, { type: 'application/octet-stream' });
 
-            if ('showSaveFilePicker' in window) {
+            if (navigator.canShare && navigator.canShare({ files: [decryptedFile] })) {
               try {
-                const handle = await window.showSaveFilePicker({
-                  suggestedName: suggestedName
+                await navigator.share({
+                  files: [decryptedFile],
+                  title: 'קובץ מפוענח',
+                  text: 'קובץ שפוענח מהכספת'
                 });
-                const writable = await handle.createWritable();
-                await writable.write(blob);
-                await writable.close();
                 updateStatus(t.statusDecryptedFile(suggestedName));
                 return;
-              } catch (pickerErr) {
-                if (pickerErr.name === 'AbortError') return;
+              } catch (shareErr) {
+                if (shareErr.name === 'AbortError') return;
               }
             }
 
             const blobUrl = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = suggestedName;
-            document.body.appendChild(link);
-            link.click();
+            const linkElem = document.createElement('a');
+            linkElem.href = blobUrl;
+            linkElem.download = suggestedName;
+            document.body.appendChild(linkElem);
+            linkElem.click();
             setTimeout(() => {
-              document.body.removeChild(link);
+              document.body.removeChild(linkElem);
               URL.revokeObjectURL(blobUrl);
             }, 1000);
 
